@@ -1,8 +1,8 @@
 # act
 shell command line activity tracker 
 
------------- # activity --------------------------------------------------------------
-.an  s1 s2 ..            - new activity for backlog - continue working on old task
+#------------ # activity --------------------------------------------------------------
+#.an  s1 s2 ..            - new activity for backlog - continue working on old task
 .ai  s1 s2 ..            - new activity interrupt current activity 
 .af                      - current activity finished 
 .ala                     - list active activities in threads see also .aqt and .aqti 
