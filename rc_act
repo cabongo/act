@@ -1,0 +1,731 @@
+
+
+
+ACT_DIR_HOME=$HOME/act
+ACT_DIR_BLOG=${ACT_DIR_HOME}/backlog
+ACT_DIR_ACTIVE=${ACT_DIR_HOME}/active
+ACT_DIR_ARCHIVE=${ACT_DIR_HOME}/archive
+ACT_DIR_THREADS=${ACT_DIR_HOME}/threads
+
+ACT_DIR_ARC_BLOG=${ACT_DIR_ARCHIVE}/${ACT_DIR_BLOG##*/}
+ACT_DIR_ARC_ACTIVE=${ACT_DIR_ARCHIVE}/${ACT_DIR_ACTIVE##*/}
+ACT_DIR_ARC_THREADS=${ACT_DIR_ARCHIVE}/${ACT_DIR_THREADS##*/}
+
+ACT_A_CURR="${ACT_DIR_HOME}/current"
+ACT_A_CURF="$(readlink $ACT_A_CURR)"
+
+ACT_FMT_TS="%Y-%m-%d_%H:%M:%S"
+ACT_FMT_DELIM=§
+
+ACT_STR_INFO=inf.
+ACT_STR_INFO_EXT=.txt
+
+##########################################
+# ENVS
+##########################################
+__ACT_NEW=""     #   str2fn string to be generated ones only
+__ACT_INIT=""    #   indicates that called from initial init
+
+##########################################
+# setup new thread
+##########################################
+function __act_new_thread
+{
+    typeset tn=$1   # thread name
+
+    tn=thr-${tn:-$(date "+%Y%m%d-%H%M%S")}
+    mkdir ${ACT_DIR_THREADS}/$tn
+    __act_new_current ${ACT_DIR_THREADS}/$tn 
+}
+
+##########################################
+# initialize current if not set
+# $1 converted str2fn 
+##########################################
+function __act_init_current
+{
+
+    # a.) check link - abort if stale (inconsistent)
+    # b.) check for active entry - must exist
+    # c.) save old current add new entry below current
+    # d.) rename current
+
+    # a.) 
+    # check whether link exists
+    # check with -f link may be stale
+    if [ ! -L $ACT_A_CURR ]
+    then
+        # create new chain
+        __act_new_thread 
+        if [ -z "$1" ]
+        then
+            return    # init from scratch
+        fi
+    fi
+    # check for stale link - fix manually
+    # current points to either empty thread or an action below thr-*
+    typeset obj=$(readlink -f $ACT_A_CURR)
+    obj=${obj##*/}
+    if [  -d $ACT_DIR_ACTIVE/$obj -o -d $ACT_DIR_THREADS/$obj ] 
+    then
+        :
+        # echo "-----: checking  -d $ACT_DIR_ACTIVE/$obj -o -d $ACT_DIR_THREADS/$obj "
+        # echo "-----: OK current=$ACT_A_CURR "
+    else
+        echo "ERROR: checking  -d $ACT_DIR_ACTIVE/$obj -o -d $ACT_DIR_THREADS/$obj "
+        echo "ERROR: $ACT_A_CURR is stale - file does not exist"
+        return
+    fi
+
+    if [ ${__ACT_INIT:-OFF} = "ON" ]
+    then
+        return
+    fi
+
+
+    # b.) 
+    if [ -z "$1" ]
+    then
+        echo "ERROR: missing activity string "
+        return
+    fi
+
+    typeset n=$1
+    typeset tn=$1  #formerly thr-.....
+
+
+    if [ ! -d ${ACT_DIR_ACTIVE}/$n ]
+    then
+        echo "ERROR: activity does not exist \"$n\" " | __act_p_fn2str
+        return -1
+    fi
+
+    typeset o=$(readlink -f $ACT_A_CURR)
+    ( cd $o && mkdir $tn )
+    # ( cd $ACT_DIR_HOME && mkdir $tn )
+    __act_new_current $(cd $o/$tn && pwd ) 
+
+
+
+}
+
+##########################################
+# set new link current /last
+##########################################
+function __act_new_current
+{
+    # echo "-----: $(ls -l $ACT_A_CURR)"
+    # echo "-----: new link for: $1"
+    rm -f $ACT_A_CURR 
+    ln -sf $(readlink -f "$1" ) $ACT_A_CURR
+    ACT_A_CURF=$(readlink -e $ACT_A_CURR)    
+}
+
+##########################################
+# init from scratch 
+##########################################
+function __act_init
+{
+    mkdir -p ${ACT_DIR_HOME}
+    mkdir -p ${ACT_DIR_BLOG}
+    mkdir -p ${ACT_DIR_ACTIVE}
+    mkdir -p ${ACT_DIR_ARCHIVE}
+    mkdir -p ${ACT_DIR_THREADS}
+    __ACT_INIT=ON __act_init_current
+
+    mkdir -p ${ACT_DIR_ARCHIVE}/${ACT_DIR_BLOG##*/}
+    mkdir -p ${ACT_DIR_ARCHIVE}/${ACT_DIR_ACTIVE##*/}
+    mkdir -p ${ACT_DIR_ARCHIVE}/${ACT_DIR_THREADS##*/}
+}
+
+
+##########################################
+# helper converts string to filename variable
+##########################################
+function __act_str2fn_v
+{
+    echo "$@" | tr ' ' '?'
+}
+
+##########################################
+# helper converts string to filename
+##########################################
+function __act_str2fn
+{
+    echo "$@" | tr ' ' '#'
+}
+
+##########################################
+# helper converts filename to string 
+##########################################
+function __act_fn2str
+{
+    echo "$@" | tr  '#'  ' '
+}
+
+##########################################
+# helper converts string to filename pipe
+##########################################
+function __act_p_str2fn
+{
+    cat | tr ' ' '#'
+}
+
+##########################################
+# helper converts filename to string pipe
+##########################################
+function __act_p_fn2str
+{
+    cat | tr  '#'  ' '
+}
+
+########################################
+# helper creates new activity
+########################################
+function __act_new_action
+{
+    typeset w=$1                            # backlog interrupt
+    typeset ts=$(date "+${ACT_FMT_TS}")
+    typeset tss=${td}                       # link name 
+    shift 
+    typeset n=$(__act_str2fn "$@" )
+
+    mkdir ${w}/act.${ts}_$n                 # new entry in one of both collections (working on and backlog)
+    __ACT_NEW=act.${ts}_$n                  # store to be used outside
+
+
+}
+
+
+########################################
+# switch to new activity
+########################################
+function __act_interrupt
+{
+    __act_new_action ${ACT_DIR_ACTIVE} "$@"
+    __act_init_current $__ACT_NEW
+}
+
+########################################
+# save activitiy for later use
+########################################
+function __act_4_backlog
+{
+    __act_new_action ${ACT_DIR_BLOG} "$@"
+}
+
+########################################
+# list backlog collection
+########################################
+function __act_list_backlog
+{
+    ( cd ${ACT_DIR_BLOG} && \ls -1tr | sed -e 's/^act.//' -e 's/^\(..........\)_\(........\)_\(.*\)/\1 \2   -  \3/' | __act_p_fn2str )
+}
+
+########################################
+# list active collection 
+########################################
+function __act_list_active
+{
+    ## ( cd ${ACT_DIR_ACTIVE} && \ls -1tr | sed -e 's/^[aA]ct.//' -e 's/^\(..........\)_\(........\)_\(.*\)/\1 \2   -  \3/' | __act_p_fn2str )
+    ( cd ${ACT_DIR_ACTIVE} && \ls -1tr | while read e
+      do
+        if [ ${e:0:1} = "A" ]
+        then
+            echo "_$e"        
+        elif [ $e = "${ACT_A_CURF##*/}" ] 
+        then
+            echo "@$e"        
+        else
+            echo "$e"        
+        fi
+      done 
+    ) | sed -e 's/^\([@_]*\)*\([aA]ct.\)\(..........\)_\(........\)_\(.*\)/\1\3 \4   -  \5/' \
+      | __act_p_fn2str \
+      | sed -e 's/^_\(.*\)/'"$(echo -e "\e[32m\\1\e[0m")"'/' \
+      | sed -e 's/^@\(.*\)/'"$(echo -e "\e[36m\\1\e[0m")"'/'
+}
+
+########################################
+# list tree for thread
+########################################
+function __act_list_thread
+{
+    # echo "-----: \$1=$1 \$2=\"$2\""
+    typeset flg_blue=""         # broken link for current
+    typeset flg_green=""       # done activity
+    typeset indent="${2:- }"   # always start with space
+    typeset ad=${ACT_DIR_THREADS}/$1
+    ACT_A_CURF=$(readlink -e ${ACT_A_CURR} )
+    ( cd ${ad} && \
+      for d in ???[-.]*
+      do
+        # nothing substituted d = wildcard string
+        if [ ! -d $d ]
+        then
+            break
+        fi
+        # check for current  add an @ at front
+        # keep in mind this is an recursion and you may come back here multiple times
+        if [ "$PWD/$d" = "$ACT_A_CURF" ]
+        then
+            flg_blue=@
+        else
+            flg_blue=
+        fi
+
+        # check wether activity has been done
+        # keep in mind this is an recursion and you may come back here multiple times
+        if [ "${d:0:4}" = "Act." ]
+        then
+            flg_green=_
+        else
+            flg_green=""
+        fi
+        # echo "-----: flg_green=${flg_green:- } $d" >&2
+        # echo "-----: 1: $PWD/$d" >&2
+        # echo "-----: 1: $ACT_A_CURF" >&2
+
+        echo "${flg_blue}${flg_green}$indent$d"
+
+        __act_list_thread $1/$d "${indent}  "
+      done
+    ) | sed -e 's/^\([@ _]*\)\([Aa]ct.\)\(..........\)_\(........\)_\(.*\)/\1\3 \4   ---------  \5/' \
+      | __act_p_fn2str                                               \
+      | sed -e 's/^_\(.*\)/'"$(echo -e "\e[32m\\1\e[0m")"'/'         \
+      | sed -e 's/^@\(.*\)/'"$(echo -e "\e[36m\\1\e[0m")"'/'         \
+      | sed -e 's/^\([ ]*thr-.*\)/'"$(echo -e "\e[33m\\1\e[0m")"'/'
+    
+}
+
+########################################
+# archive thread
+########################################
+function __act_archive_thread
+{
+
+    ( 
+      typeset a=""
+      typeset d=""
+
+      cd $ACT_DIR_THREADS && \
+      for d in $*
+      do
+         mv $d $ACT_DIR_ARC_THREADS/.
+         # manage activities - remove from active 
+         for a in $(cd $ACT_DIR_ARC_THREADS/ && find $d -type d )
+         do
+            typeset act=${ACT_DIR_ACTIVE}/${a##*/}
+            if [ -d ${act} ]
+            then
+                mv ${act} $ACT_DIR_ARC_ACTIVE/.
+            fi
+         done
+      done 
+    )
+}
+
+########################################
+# archive activity
+########################################
+function __act_archive_activity
+{
+      typeset a=""
+      typeset d=""
+      while [ $# -gt 0 ]
+      do
+         typeset p=$(echo "$1" | tr ' ' _)
+         typeset act=${ACT_DIR_ACTIVE}/act.*$p* 
+         # echo "-----: act=$act"
+         for d in  ${act} 
+         do
+            if [ -d $d ]
+            then
+              mv $d $ACT_DIR_ARC_ACTIVE/.
+            fi
+         done
+         shift 
+      done
+}
+
+########################################
+# archive backlog
+########################################
+function __act_archive_backlog
+{
+      typeset a=""
+      typeset d=""
+      while [ $# -gt 0 ]
+      do
+         typeset p=$(echo "$1" | tr ' ' _)
+         typeset act=${ACT_DIR_BLOG}/act.*$p* 
+         # echo "-----: act=$act"
+         for d in  ${act} 
+         do
+            if [ -d $d ]
+            then
+              mv $d $ACT_DIR_ARC_BLOG/.
+            fi
+         done
+         shift 
+      done
+}
+
+########################################
+# find activity 
+########################################
+function __act_find_activity
+{
+    typeset dom=$1  # find activity below - threads, backlog, archive
+    shift
+    typeset new_act="$*"
+
+
+    # reinit global variable
+    LOC_ACT_HLP_FOUND_A_STR="$@"
+    LOC_ACT_HLP_FOUND_A_ACT=""
+
+    # convert to filename
+    typeset new_partial_fn=$(__act_str2fn_v "$new_act")
+    # echo "-----: new: $new_partial_fn" >&2
+
+    typeset found=$(find $dom -type d -name "*${new_partial_fn}*")
+    
+    if [ -z "$found" ]
+    then
+        echo "W----: nothing found for:  find $dom -type d -name \"*${new_act}*}\" "
+        return
+    fi
+
+    typeset cnt=$(echo "$found" | wc -l )
+    if [ $cnt -gt 1 ]
+    then
+        echo "ERROR: found to meny entries for: $*"
+        echo "find $dom -type d -name "*${new_partial_fn}*"" 
+        typeset l
+        echo "$found" | while read l
+        do
+            echo "-----: ${l##*/} "
+        done
+        echo "ERROR: can't continue - check mgs above "
+        return
+    fi
+    
+    # store to be used outside
+    LOC_ACT_HLP_FOUND_A_ACT=$found
+}
+
+
+
+########################################
+# activate backlog activity
+########################################
+function __act_start_backlog
+{
+
+    __act_find_activity $ACT_DIR_BLOG "$*"
+
+    if [ ! -z "${LOC_ACT_HLP_FOUND_A_ACT}" ]
+    then
+       # move from backlog to active
+       mv $LOC_ACT_HLP_FOUND_A_ACT $ACT_DIR_ACTIVE/.
+       __act_init_current ${LOC_ACT_HLP_FOUND_A_ACT##*/}
+    fi
+
+    # echo "LOC_ACT_HLP_FOUND_A_STR=$LOC_ACT_HLP_FOUND_A_STR"
+    # echo "LOC_ACT_HLP_FOUND_A_ACT=\"$LOC_ACT_HLP_FOUND_A_ACT\""
+
+}
+
+########################################
+# switch to activity or thread
+########################################
+function __act_switch_to
+{
+    typeset new_act="$*"
+
+    # convert to filename
+    typeset new_partial_fn=$(__act_str2fn_v "$new_act")
+    # echo "-----: newa: $new_partial_fn" >&2
+
+    typeset found=$(find $ACT_DIR_THREADS -type d -name "*${new_partial_fn}*")
+    
+    if [ -z "$found" ]
+    then
+        echo "W----: nothing found for:  find $ACT_DIR_THREADS -type d -name \"*${new_act}*}\" "
+        return
+    fi
+
+    typeset cnt=$(echo "$found" | wc -l )
+    if [ $cnt -gt 1 ]
+    then
+        echo "ERROR: found to meny entries for: $*"
+        echo "find $ACT_DIR_THREADS -type d -name "*${new_partial_fn}*"" 
+        typeset l
+        echo "$found" | while read l
+        do
+            echo "-----: ${l##*/} "
+        done
+        return
+    fi
+
+    #
+    __act_new_current $found
+}
+
+
+########################################
+# activity finished pop from stack
+########################################
+function __act_finished
+{
+
+    # requiers an active session
+    ACT_A_CURF=$(readlink $ACT_A_CURR )
+    
+    if [ $? -ne 0 ]
+    then
+        echo -e "current: $ACT_A_CURR -> \e[31m link broken !!! \e[0m"
+        return 
+    fi
+
+    (  
+       # switch to parent
+       cd ${ACT_A_CURF%/*} 
+
+       # check wether top has been reached
+       if [ $PWD = ${ACT_DIR_THREADS} ]
+       then
+          echo "W----: thread top reached "
+          echo "W----: switch to other thread or task using .as2 ...."
+          return
+       fi
+
+       typeset an=${ACT_A_CURF##*/}
+       an=${an:0:3}
+       if [ $an = "Act" ]
+       then
+         echo -e "Activity already finished \e[31m ${ACT_A_CURF##*/} \e[0m"
+         return
+       fi
+
+       # pwd
+       # echo "-----: mv ${ACT_A_CURF} A${ACT_A_CURF##*/a}"
+
+       mv ${ACT_A_CURF} A${ACT_A_CURF##*/a}
+
+       # rename in active activities dir 
+       typeset aa=$ACT_DIR_ACTIVE/${ACT_A_CURF##*/}
+       if [ -d $aa ]
+       then
+         mv $aa ${ACT_DIR_ACTIVE}/A${aa##*/a} 
+       fi
+
+
+       # iterate search for next active action (act.* not Act.*)
+       typeset ne_curr=""
+       while [ $PWD \> ${ACT_DIR_THREADS} ]
+       do
+            typeset hlp=${PWD##*/}
+            if [ "${hlp:0:4}" = "act." -o "${hlp:0:4}" = "thr-" ]
+            then
+                new_curr=$PWD
+                break
+            fi
+            cd ..
+            echo "W-----: .... !!! ${hlp:0:4} ### $PWD" >&2
+            sleep 1
+       done
+       __act_new_current $PWD
+    )
+
+}
+
+########################################
+# display help
+########################################
+function __act_help
+{
+    echo ""
+    echo "------------ # activity --------------------------------------------------------------"
+    echo ".an  s1 s2 ..            - new activity for backlog - continue working on old task"
+    echo ".ai  s1 s2 ..            - new activity interrupt current activity "
+    echo ".af                      - current activity finished "
+    echo ".ala                     - list active activities in threads see also .aqt and .aqti "
+    echo ".alb                     - list backlog activities "
+    echo ".ali                     - list info files for actions created with .ani"
+    echo ".asb s1 s2 ..            - start activity from backlog"
+    echo ".as2 s1 s2 ..            - switch to new activity"
+    echo "------------ # threads --------------------------------------------------------------"
+    echo ".ant [name]              - new activity thread - new chain "
+    echo ".alt [thr]               - list threads"
+    echo "------------ # query   --------------------------------------------------------------"
+    echo ".aqt                     - query threads simple view"
+    echo ".aqti                    - query threads status info "
+    echo "------------ # archiving ------------------------------------------------------------"
+    echo ".aat [thr]               - archive thread see .aqt or .alt "
+    echo ".aaa \"time stamp\"        - archive activity use ts from .ala "
+    echo ".aab \"time stamp\"        - archive activity use ts from .alb "
+    echo "------------ # misc -----------------------------------------------------------------"
+    echo ".ah                      - this help"
+    echo ""
+}
+
+
+########################################
+# info check current  link below act 
+########################################
+function __act_list_current
+{
+    ACT_A_CURF=$(readlink -f $ACT_A_CURR)
+    if [ -d "$ACT_A_CURR" ]
+    then
+        echo "current: $ACT_A_CURR -> ${ACT_A_CURF:- stale link }"
+    else
+        echo -e "current: $ACT_A_CURR -> \e[31m link broken !!! \e[0m ${ACT_A_CURF:- stale link }"
+    fi
+}
+
+
+########################################
+# info check current link below act 
+########################################
+function __act_query_threads
+{
+    typeset threads=$( cd $ACT_DIR_THREADS && ls -1trd thr-*)
+
+    if [ ${ACT_OPT_STATS_THR:-OFF} = ON ]
+    then
+        echo ""
+        echo "########################################################################"
+        echo "# S-TSK  TBD   DONE  Thread-Name "
+        echo "########################################################################"
+        typeset s_ts=0
+        typeset s_tp=0
+        typeset s_td=0
+        for t in $threads
+        do
+           typeset subt=$(find $ACT_DIR_THREADS/$t -type d -name "[aA]ct.*" | sed -e 's/.*\///')
+           typeset ts="$(echo "$subt" | wc -l )"                       # all
+           typeset tp="$(echo "$subt" | grep "^act\." | wc -l )"       # pending tbd
+           typeset td="$(echo "$subt" | grep "^Act\." | wc -l )"       # done
+
+           printf "%6d%5d%5d    %s\n" "$ts" "$tp" "$td" "$t"
+           s_ts=$(( $s_ts + $ts ))
+           s_tp=$(( $s_tp + $tp ))
+           s_td=$(( $s_td + $td ))
+        done
+        echo "------------------------------------------------------------------------"
+        printf "%6d%5d%5d    %s\n\n" "$s_ts" "$s_tp" "$s_td" "TOTAL"
+    else 
+        echo "$threads"
+    fi
+
+}
+
+########################################
+# list info files
+########################################
+function __act_list_info_files
+{
+
+    typeset view_mode=${1}
+
+
+    if [ "$view_mode" = "file" ]
+    then
+        find  ${ACT_DIR_BLOG} ${ACT_DIR_ACTIVE} -type f -name "${ACT_STR_INFO}"*${ACT_STR_INFO_EXT} -ls
+
+    else
+
+        find  ${ACT_DIR_BLOG} ${ACT_DIR_ACTIVE} -type f -name "${ACT_STR_INFO}"*${ACT_STR_INFO_EXT} \
+                  | while read line 
+                  do
+                    echo "${line#${line%/*/*}/} "
+                  done                     \
+                  | sed -e 's/^[A]ct\./_/' \
+                  | sed -e 's/^[a]ct\.//' \
+                        -e 's/\// /'       \
+                  | while read a f 
+                  do
+                    if [ "$la" != "$a" ]
+                    then
+                        echo "$a" | sed  -e 's/^\(..........\)_\(........\)_\(.*\)/\1 \2   -  \3/' |  __act_p_fn2str 
+                        la=$a
+                    fi
+                    echo "   - $f"
+                  done | sed -e 's/^_\(.*\)/'"$(echo -e "\e[32m\\1\e[0m")"'/'         
+    fi
+}
+
+########################################
+# info file for action (action or backlog
+########################################
+function __act_info_4_action
+{
+
+    # find action 
+    __act_find_activity "$ACT_DIR_BLOG ${ACT_DIR_ACTIVE}" "$1"
+
+    if [ -z "${LOC_ACT_HLP_FOUND_A_ACT}" ]
+    then
+         echo -e "\e[31m no activity found for \"$1\" !!! \e[0m "
+        return
+    else
+        # echo "#### using ${LOC_ACT_HLP_FOUND_A_ACT}"
+        # check wether copy and pase from existing file seen by .ali has been used
+        typeset f1=${LOC_ACT_HLP_FOUND_A_ACT}/"${2:-meta}"
+        if [ -f ${f1} ]
+        then
+            vi $f1
+        else
+            vi ${LOC_ACT_HLP_FOUND_A_ACT}/${ACT_STR_INFO}"${2:-meta}"${ACT_STR_INFO_EXT}
+        fi
+    fi
+}
+
+
+alias .ainit=__act_init
+alias .ah=__act_help
+alias .ai=__act_interrupt
+alias .an=__act_4_backlog
+alias .ani=__act_info_4_action
+alias .ant=__act_new_thread
+alias .alb=__act_list_backlog
+alias .alc=__act_list_current
+alias .ali=__act_list_info_files
+alias .alif="__act_list_info_files file"
+alias .ala=__act_list_active
+alias .alt=__act_list_thread 
+alias .as2=__act_switch_to
+alias .asb=__act_start_backlog
+alias .aat=__act_archive_thread
+alias .aaa=__act_archive_activity
+alias .aab=__act_archive_backlog
+alias .af=__act_finished
+# query actions
+alias .aqt=__act_query_threads
+alias .aqti="(ACT_OPT_STATS_THR=ON __act_query_threads )"
+alias .aqm=__act_query_meta
+
+
+##########################################
+# TDB:
+##########################################
+# ----- add meta data
+# ----- create statistics
+# ----- activate backlog
+
+
+
+
+
+
+
+
+
+
+
+
+
+
