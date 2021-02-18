@@ -1,7 +1,7 @@
 # act
 shell command line activity tracker by threads
 
-simple file based structure below
+simple file based structure with aliases se rc_act 
 
 ------------ # activity --------------------------------------------------------------
 .an  s1 s2 ..            - new activity for backlog - continue working on old task
