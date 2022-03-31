@@ -19,6 +19,8 @@ ACT_FMT_DELIM=§
 
 ACT_STR_INFO=inf.
 ACT_STR_INFO_EXT=.txt
+ACT_DEBUG=
+ACT_DISPLAY_FLT_ALL=""      #default off 
 
 ##########################################
 # ENVS
@@ -114,6 +116,8 @@ function __act_init_current
 ##########################################
 function __act_new_current
 {
+    # @w: modify the link only if changed by $1
+
     # echo "-----: $(ls -l $ACT_A_CURR)"
     # echo "-----: new link for: $1"
     rm -f $ACT_A_CURR 
@@ -246,12 +250,51 @@ function __act_list_active
       | sed -e 's/^@\(.*\)/'"$(echo -e "\e[36m\\1\e[0m")"'/'
 }
 
+
+########################################
+# eval wether to display or not
+# p1: grenn flg (done)
+# p2: active flg current selection
+#######################################
+function display_filter_item
+{
+    # if all requeste than return imediately without further checks
+    # display ing all items must be specified
+    if [ ! -z "$ACT_DISPLAY_FLT_ALL" ]
+    then
+        return 
+    fi
+
+    # if not done 
+    if [ -z "$2" ]
+    then
+        return
+    fi
+
+    # if current
+    if [ ! -z "$1" ]
+    then
+        return
+    fi
+
+    # filter out
+    echo "filter-this-item"
+}
+
+########################################
+# list tree for thread all actions
+########################################
+function __act_list_thread_all
+{
+    ACT_DISPLAY_FLT_ALL=ON __act_list_thread $@
+}
+
 ########################################
 # list tree for thread
 ########################################
 function __act_list_thread
 {
-    # echo "-----: \$1=$1 \$2=\"$2\""
+    # echo "-----: \$1=$1 \$2=\"$2\" "
     typeset flg_blue=""         # broken link for current
     typeset flg_green=""       # done activity
     typeset indent="${2:- }"   # always start with space
@@ -286,9 +329,15 @@ function __act_list_thread
         # echo "-----: 1: $PWD/$d" >&2
         # echo "-----: 1: $ACT_A_CURF" >&2
 
-        echo "${flg_blue}${flg_green}$indent$d"
+        #@@ wdg filter out completed
+        #echo "${flg_blue}${flg_green}$indent$d"
+        if [ -z "$(display_filter_item "$flg_blue" "$flg_green" )" ]
+        then
+            echo "${flg_blue}${flg_green}$indent$d"
+            spaces="  "
+        fi 
 
-        __act_list_thread $1/$d "${indent}  "
+        __act_list_thread $1/$d "${indent}$spaces"
       done
     ) | sed -e 's/^\([@ _]*\)\([Aa]ct.\)\(..........\)_\(........\)_\(.*\)/\1\3 \4   ---------  \5/' \
       | __act_p_fn2str                                               \
@@ -311,9 +360,10 @@ function __act_archive_thread
       cd $ACT_DIR_THREADS && \
       for d in $*
       do
-         mv $d $ACT_DIR_ARC_THREADS/.
+         typeset tname=$ACT_DIR_ARC_THREADS/$d.$(date "+%Y%m%d-%H%M%S")
+         mv $d $tname
          # manage activities - remove from active 
-         for a in $(cd $ACT_DIR_ARC_THREADS/ && find $d -type d )
+         for a in $(cd $tname/../. && find $d -type d )
          do
             typeset act=${ACT_DIR_ACTIVE}/${a##*/}
             if [ -d ${act} ]
@@ -376,10 +426,13 @@ function __act_archive_backlog
 ########################################
 function __act_find_activity
 {
+    typeset flg_warn=$1  # no warning out put to console if 0 
+    shift 
+
     typeset dom=$1  # find activity below - threads, backlog, archive
     shift
-    typeset new_act="$*"
 
+    typeset new_act="$*"
 
     # reinit global variable
     LOC_ACT_HLP_FOUND_A_STR="$@"
@@ -393,7 +446,10 @@ function __act_find_activity
     
     if [ -z "$found" ]
     then
-        echo "W----: nothing found for:  find $dom -type d -name \"*${new_act}*}\" "
+        if [ $flg_warn -ne 0 ]
+        then
+            echo "W----: nothing found for:  find $dom -type d -name \"*${new_act}*\" "
+        fi
         return
     fi
 
@@ -423,7 +479,7 @@ function __act_find_activity
 function __act_start_backlog
 {
 
-    __act_find_activity $ACT_DIR_BLOG "$*"
+    __act_find_activity 1 $ACT_DIR_BLOG "$*"
 
     if [ ! -z "${LOC_ACT_HLP_FOUND_A_ACT}" ]
     then
@@ -453,7 +509,7 @@ function __act_switch_to
     if [ -z "$found" ]
     then
         echo "W----: nothing found for:  find $ACT_DIR_THREADS -type d -name \"*${new_act}*}\" "
-        return
+        return 
     fi
 
     typeset cnt=$(echo "$found" | wc -l )
@@ -474,71 +530,230 @@ function __act_switch_to
 }
 
 
+####################################################
+# rename action file - switch from A... to a....
+# $1 : action to be processed 
+####################################################
+function __act_hlp_rename_swA2a
+{
+    typeset f=$@
+    typeset n=${f##*/}
+
+    # check whether already finished
+    typeset an=${n:0:3}
+    if [ $an = "Act" ]
+    then
+        echo -e "Activity already finished \e[31m ${f##*/} \e[0m"
+        return
+    fi
+
+    if [ -d "$f" ]
+    then
+        ${ACT_DEBUG:+ echo "####### : " mv ${f} ${f%/*}/A${f##*/a}}
+        mv ${f} ${f%/*}/A${f##*/a}
+    else
+        echo -e "\e[31m ERROR: __act_hlp_rename_swA2a no such file \"$f\" \e[0m "
+    fi
+}
+
+########################################
+# activity finished pop from stack
+# $1 : action to be processed may be from
+#      backlog, active or threads (current action)
+#      this is an activity from BACKLOG or ACTIVE
+########################################
+function __act_hlp_finish
+{
+
+    ${debug__act_hlp_finish:+set -x}
+
+    typeset act_file=$1                    # action file 
+    typeset act_name=${act_file##*/}       # search str
+
+    # search in ACT_DIR_THREADS
+    __act_find_activity 0 $ACT_DIR_THREADS "${act_name##*/}"
+    typeset act_file_thr=$LOC_ACT_HLP_FOUND_A_ACT
+
+    # search in ACT_DIR_BLOG !!! removed/disabled !!!
+    # __act_find_activity 0 $ACT_DIR_BLOG "${act_name##*/}"
+    # typeset act_file_blog=$LOC_ACT_HLP_FOUND_A_ACT
+
+    # search in ACT_DIR_ACTIVE
+    __act_find_activity 0 $ACT_DIR_ACTIVE "${act_name##*/}"
+    typeset act_file_active=$LOC_ACT_HLP_FOUND_A_ACT
+
+    # echo "### blg : \"$act_file_blog\""
+    ${ACT_DEBUG:+ echo "### thr : \"$act_file_thr\""}
+    ${ACT_DEBUG:+ echo "### act : \"$act_file_active\""}
+
+    # rename file if found
+    # ${act_file_blog:+   __act_hlp_rename_swA2a $act_file_blog }
+    ${act_file_active:+ __act_hlp_rename_swA2a $act_file_active }
+    ${act_file_thr:+    __act_hlp_rename_swA2a $act_file_thr }
+
+
+    # keep in mind : optional current link become obsolete
+    # may be $1 is the current action
+    # or current action is in the chain behind this activity
+
+    ${debug__act_hlp_finish:+set +x}
+}
+
+########################################
+# activity to be deleted
+# $1 : optional backlog action
+# $2 : optional active action
+# $3 : optional active action within thr
+########################################
+function __act_hlp_rm
+{
+
+    typeset blg=$1
+    if [ ! -z "$blg" ]
+    then
+        ${ACT_DEBUG:+ echo "### blg : rm -rf $blg" }
+        rmdir $blg
+    fi
+
+    typeset act=$2
+    if [ ! -z "$act" ]
+    then
+        ${ACT_DEBUG:+ echo "### act : rm -rf $act" }
+        rmdir $act
+    fi
+
+    # set -x 
+    typeset thr=$3
+    if [ ! -z "$thr" ]
+    then
+        ( 
+          cd ${thr} && \
+          { 
+              for obj in $(\ls -1 2>/dev/null) 
+              do
+                    ${ACT_DEBUG:+ echo "### act : mv $obj $thr/../." }  
+                    mv $obj ${thr}/../.
+              done
+          }
+        )
+
+        # now remove the empty dir
+        ${ACT_DEBUG:+ echo "### thr : rm -rf ${thr}" }
+        rmdir $thr
+    fi
+    # set -x 
+}
+
+########################################
+# activity to be deleted
+# $* : action to be processed may be from
+########################################
+function __act_rm
+{
+
+    ${debug__act_rm:+ set -x}
+
+    typeset act_name="$*"                  # search str
+
+    # search in ACT_DIR_THREADS
+    __act_find_activity 0 $ACT_DIR_THREADS "${act_name}"
+    typeset act_file_thr=$LOC_ACT_HLP_FOUND_A_ACT
+
+    # search in ACT_DIR_BLOG 
+    __act_find_activity 0 $ACT_DIR_BLOG "${act_name}"
+    typeset act_file_blog=$LOC_ACT_HLP_FOUND_A_ACT
+
+    # search in ACT_DIR_ACTIVE
+    __act_find_activity 0 $ACT_DIR_ACTIVE "${act_name}"
+    typeset act_file_active=$LOC_ACT_HLP_FOUND_A_ACT
+
+    ${ACT_DEBUG:+ echo "### blg : \"$act_file_blog\""}
+    ${ACT_DEBUG:+ echo "### act : \"$act_file_active\""}
+    ${ACT_DEBUG:+ echo "### thr : \"$act_file_thr\""}
+
+    # rename file if found
+    __act_hlp_rm "$act_file_blog" "$act_file_active" "$act_file_thr"
+
+    # keep in mind : optional current link become obsolete
+    # may be $1 is the current action
+    # or current action is in the chain behind this activity
+
+    readlink -f $ACT_A_CURF 2>&1 >/dev/null || __act_switch_to ${ACT_A_CURF##*/} 
+
+    ${debug__act_rm:+ set +x}
+
+}
+
 ########################################
 # activity finished pop from stack
 ########################################
 function __act_finished
 {
 
-    # requiers an active session
-    ACT_A_CURF=$(readlink $ACT_A_CURR )
-    
-    if [ $? -ne 0 ]
+    if [ $# -eq 0 ]
     then
-        echo -e "current: $ACT_A_CURR -> \e[31m link broken !!! \e[0m"
-        return 
-    fi
+        # requiers an active session
+        ACT_A_CURF=$(readlink $ACT_A_CURR )
+    
+        if [ $? -ne 0 ]
+        then
+            echo -e "current: $ACT_A_CURR -> \e[31m link broken !!! \e[0m"
+            return 
+        fi
 
-    (  
-       # switch to parent
-       cd ${ACT_A_CURF%/*} 
+        # rename / finish
+        __act_hlp_finish $ACT_A_CURF
 
-       # check wether top has been reached
-       if [ $PWD = ${ACT_DIR_THREADS} ]
-       then
-          echo "W----: thread top reached "
-          echo "W----: switch to other thread or task using .as2 ...."
-          return
-       fi
+        # search next unfinished action upwards 
+        # iterate search for next active action (act.* not Act.*)
+        typeset next_curr="${ACT_A_CURF%/*}"
 
-       typeset an=${ACT_A_CURF##*/}
-       an=${an:0:3}
-       if [ $an = "Act" ]
-       then
-         echo -e "Activity already finished \e[31m ${ACT_A_CURF##*/} \e[0m"
-         return
-       fi
-
-       # pwd
-       # echo "-----: mv ${ACT_A_CURF} A${ACT_A_CURF##*/a}"
-
-       mv ${ACT_A_CURF} A${ACT_A_CURF##*/a}
-
-       # rename in active activities dir 
-       typeset aa=$ACT_DIR_ACTIVE/${ACT_A_CURF##*/}
-       if [ -d $aa ]
-       then
-         mv $aa ${ACT_DIR_ACTIVE}/A${aa##*/a} 
-       fi
-
-
-       # iterate search for next active action (act.* not Act.*)
-       typeset ne_curr=""
-       while [ $PWD \> ${ACT_DIR_THREADS} ]
-       do
-            typeset hlp=${PWD##*/}
+        while [ "$next_curr" \> "${ACT_DIR_THREADS}" ]
+        do
+            typeset hlp=${next_curr##*/}
             if [ "${hlp:0:4}" = "act." -o "${hlp:0:4}" = "thr-" ]
             then
-                new_curr=$PWD
                 break
             fi
-            cd ..
-            echo "W-----: .... !!! ${hlp:0:4} ### $PWD" >&2
-            sleep 1
-       done
-       __act_new_current $PWD
-    )
+            ${ACT_DEBUG:+ echo "W-----: .... !!! ${hlp:0:4} ### $next_curr"} >&2
+            sleep 0.5
+            next_curr=${next_curr%/*}
+        done
+       __act_new_current $next_curr
 
+    else
+
+        # action given on command line
+        # find action 
+        __act_find_activity 1 "$ACT_DIR_BLOG ${ACT_DIR_ACTIVE}" "$*"
+        
+        if [ -z "${LOC_ACT_HLP_FOUND_A_ACT}" ]
+        then
+            echo -e "\e[31m no unique activity found for \"$*\" !!! \e[0m "
+            return
+        else
+            # ..... 
+            echo -e "\e[32m OK: found  activity for \"$*\" !!! $LOC_ACT_HLP_FOUND_A_ACT \e[0m "
+
+            typeset act_file
+            act_file=${LOC_ACT_HLP_FOUND_A_ACT##*/}
+
+            __act_hlp_finish $LOC_ACT_HLP_FOUND_A_ACT
+
+           
+            # validate current link see comment at the end of __act_hlp_finish
+            typeset str_replace=A${act_file#?}
+            
+            typeset str_new_current=$( echo $ACT_A_CURF | sed -e "s?${act_file}?${str_replace}?") 
+
+            if [ "$ACT_A_CURF" != "$str_new_current" ]
+            then 
+                ${ACT_DEBUG:+ echo "####### : __act_old_current $ACT_A_CURF" }
+                ${ACT_DEBUG:+ echo "####### : __act_new_current $str_new_current" }
+                __act_new_current $str_new_current
+            fi
+        fi
+    fi
 }
 
 ########################################
@@ -550,15 +765,20 @@ function __act_help
     echo "------------ # activity --------------------------------------------------------------"
     echo ".an  s1 s2 ..            - new activity for backlog - continue working on old task"
     echo ".ai  s1 s2 ..            - new activity interrupt current activity "
-    echo ".af                      - current activity finished "
+    echo ".af  [s1 s2 .. ]         - activity finished - wthout param use current activity"
     echo ".ala                     - list active activities in threads see also .aqt and .aqti "
     echo ".alb                     - list backlog activities "
-    echo ".ali                     - list info files for actions created with .ani"
     echo ".asb s1 s2 ..            - start activity from backlog"
     echo ".as2 s1 s2 ..            - switch to new activity"
+    echo ".arm s1 s2 ..            - rm/delete activity from system "
+    echo "------------ # info files ------------------------------------------------------------"
+    echo ".ani s1 s2               - new action info file for action "
+    echo ".ali                     - list info files for actions created with .ani"
+    echo ".alif                    - list info files for actions created with .ani full path"
     echo "------------ # threads --------------------------------------------------------------"
-    echo ".ant [name]              - new activity thread - new chain "
-    echo ".alt [thr]               - list threads"
+    echo ".ant  [name]             - new thread - new chain "
+    echo ".alt  [thr]              - list threads not finished activities"
+    echo ".alta [thr]              - list threads all entries "
     echo "------------ # query   --------------------------------------------------------------"
     echo ".aqt                     - query threads simple view"
     echo ".aqti                    - query threads status info "
@@ -568,6 +788,7 @@ function __act_help
     echo ".aab \"time stamp\"        - archive activity use ts from .alb "
     echo "------------ # misc -----------------------------------------------------------------"
     echo ".ah                      - this help"
+    echo "ACT_DEBUG=ON             - enables additional output"
     echo ""
 }
 
@@ -665,7 +886,7 @@ function __act_info_4_action
 {
 
     # find action 
-    __act_find_activity "$ACT_DIR_BLOG ${ACT_DIR_ACTIVE}" "$1"
+    __act_find_activity 1 "$ACT_DIR_BLOG ${ACT_DIR_ACTIVE}" "$1"
 
     if [ -z "${LOC_ACT_HLP_FOUND_A_ACT}" ]
     then
@@ -689,6 +910,7 @@ alias .ainit=__act_init
 alias .ah=__act_help
 alias .ai=__act_interrupt
 alias .an=__act_4_backlog
+alias .arm=__act_rm
 alias .ani=__act_info_4_action
 alias .ant=__act_new_thread
 alias .alb=__act_list_backlog
@@ -697,13 +919,13 @@ alias .ali=__act_list_info_files
 alias .alif="__act_list_info_files file"
 alias .ala=__act_list_active
 alias .alt=__act_list_thread 
+alias .alta=__act_list_thread_all 
 alias .as2=__act_switch_to
 alias .asb=__act_start_backlog
 alias .aat=__act_archive_thread
 alias .aaa=__act_archive_activity
 alias .aab=__act_archive_backlog
 alias .af=__act_finished
-# ##############
 # query actions
 alias .aqt=__act_query_threads
 alias .aqti="(ACT_OPT_STATS_THR=ON __act_query_threads )"
