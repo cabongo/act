@@ -42,7 +42,7 @@ SYS_ACT_DIR_HOME         - overwrites ACT_DIR_HOME default $HOME/act
 HOWTO mini :
 -------------
 
-A.) run rc_act in the current shell or at logintime
+A.) run rc_act in the current shell or at login
     . rc_act
 B.) initialze once ( optional set environment SYS_ACT_DIR_HOME )
     .ainit
